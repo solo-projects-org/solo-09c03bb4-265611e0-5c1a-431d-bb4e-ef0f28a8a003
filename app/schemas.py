@@ -55,9 +55,61 @@ class TestOut(BaseModel):
     end_ts: int
     max_level: int
     imported_at: str
+    repair_pending: bool = Field(
+        False, description="是否处于摘要待修状态（待修期间峰谷查询暂停）"
+    )
 
 
 class ImportResponse(TestOut):
     block_counts: dict[str, int] = Field(
         ..., description="每个摘要层级生成的块数"
     )
+
+
+class RebuildRequest(BaseModel):
+    reason: str = Field("", description="待修原因备注，随待修登记保存")
+    requested_by: str = Field("", description="发起人（档案员）标识")
+
+
+class RebuildValidationOut(BaseModel):
+    """重建前对采样与登记信息的核对结果。"""
+
+    registered_sample_count: int
+    registered_start_ts: int
+    registered_end_ts: int
+    actual_sample_count: int
+    actual_start_ts: int
+    actual_end_ts: int
+    strictly_increasing: bool
+
+
+class RebuildResponse(BaseModel):
+    test_id: int
+    status: str = Field(..., description="rebuilt 表示重建完成")
+    repair_pending: bool = Field(..., description="重建成功后为 false（待修已解除）")
+    max_level: int = Field(..., description="重建后的最高摘要层级号")
+    block_counts: dict[str, int] = Field(..., description="每个摘要层级重建出的块数")
+    validation: RebuildValidationOut
+    message: str
+
+
+class RebuildErrorOut(BaseModel):
+    """校验失败响应：待修状态保留，修复数据后可重试。"""
+
+    test_id: int
+    status: str = Field(..., description="pending_repair 表示仍处待修")
+    repair_pending: bool = Field(..., description="校验失败时恒为 true")
+    error: str = Field(..., description="校验失败原因")
+    message: str
+
+
+class RepairStatusOut(BaseModel):
+    test_id: int
+    test_name: str
+    repair_pending: bool
+    reason: str = ""
+    requested_by: str = ""
+    attempts: int = 0
+    last_error: str | None = None
+    marked_at: str | None = None
+    updated_at: str | None = None

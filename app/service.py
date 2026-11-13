@@ -8,6 +8,10 @@ from . import config
 from .schemas import BucketOut, PointOut, QueryMetrics, QueryResponse
 from .summaries import Stats, range_summary
 
+
+class RepairPendingError(RuntimeError):
+    """试验摘要待修：重建完成前暂停峰谷查询，避免把索引缺失当成断采。"""
+
 _ROLE_ORDER = ("first", "last", "max", "min")
 # 角色 -> Stats 中对应的 (ts 字段, pressure 字段)
 _ROLE_FIELDS = {
@@ -42,9 +46,19 @@ def bucket_query(
     bucket_width_ms: int,
 ) -> QueryResponse:
     """从 start_ts 起按固定桶宽分桶（左含右不含），末桶截到 end_ts。"""
+    # 显式开启事务：待修检查与摘要读取落在同一快照，
+    # 保证一次查询不会混读重建前 / 重建后的摘要。
+    conn.execute("BEGIN")
     test = conn.execute("SELECT * FROM tests WHERE id = ?", (test_id,)).fetchone()
     if test is None:
         raise KeyError(f"试验 {test_id} 不存在")
+    if conn.execute(
+        "SELECT 1 FROM pending_repairs WHERE test_id = ?", (test_id,)
+    ).fetchone():
+        raise RepairPendingError(
+            f"试验 {test_id} 的峰谷摘要待修：重建完成并解除待修前暂停查询，"
+            "请稍后重试或联系档案员"
+        )
 
     span = end_ts - start_ts
     bucket_count = (span + bucket_width_ms - 1) // bucket_width_ms

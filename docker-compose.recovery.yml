@@ -1,0 +1,25 @@
+# 故障盘救回演示：叠加在主 docker-compose.yml 之上。
+# 先用一次性容器写入"救回试验库"（采样在、摘要残缺/登记不符），再启动 API。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.recovery.yml up --build
+#
+# 演示脚本见 README「故障盘救回：按编号重建摘要」一节。
+
+services:
+  recovery-seed:
+    build: .
+    image: pump-hammer-api:1.1.0
+    container_name: pump-recovery-seed
+    environment:
+      PUMP_BLOCK_SIZE: "128"
+    command: ["python", "scripts/seed_recovery_db.py", "/data/pump_tests.db"]
+    volumes:
+      - pump-data:/data
+      - ./scripts:/app/scripts:ro
+    restart: "no"
+
+  pump-api:
+    depends_on:
+      recovery-seed:
+        condition: service_completed_successfully

@@ -1,15 +1,18 @@
 """SQLite 连接与建表。
 
 表结构：
-- tests      试验元信息
-- samples    原始毫秒采样（rowid 即严格递增的采样序号）
-- blocks     多级摘要块，level 1 为最细索引块，level 越大粒度越粗
+- tests           试验元信息
+- samples         原始毫秒采样（rowid 即严格递增的采样序号）
+- blocks          多级摘要块，level 1 为最细索引块，level 越大粒度越粗
+- pending_repairs 摘要待修登记：档案员发起重建前先落库，
+                  服务重启或重建失败都保留，重建成功才在同一事务里解除
 """
 
 from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 
 from . import config
@@ -60,6 +63,17 @@ CREATE TABLE IF NOT EXISTS blocks (
 
 CREATE INDEX IF NOT EXISTS idx_blocks_test_level_ts
     ON blocks (test_id, level, start_ts, end_ts);
+
+CREATE TABLE IF NOT EXISTS pending_repairs (
+    test_id      INTEGER PRIMARY KEY,
+    reason       TEXT    NOT NULL DEFAULT '',
+    requested_by TEXT    NOT NULL DEFAULT '',
+    attempts     INTEGER NOT NULL DEFAULT 1,
+    last_error   TEXT,
+    marked_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (test_id) REFERENCES tests(id)
+);
 """
 
 
@@ -88,10 +102,11 @@ def session() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def init_db() -> None:
-    """进程启动时调用，幂等建库建表。"""
-    config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = connect()
+def init_db(db_path=None) -> None:
+    """进程启动时调用，幂等建库建表。可指定库路径（默认取配置）。"""
+    path = Path(db_path) if db_path is not None else config.DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect(path)
     try:
         conn.executescript(_SCHEMA)
         conn.commit()
